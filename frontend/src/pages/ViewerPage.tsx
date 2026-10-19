@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, AlertTriangle, Menu } from 'lucide-react'
 import { useDicomLayout } from '../hooks/useDicomLayout'
 import SeriesPanel from '../components/viewer/SeriesPanel'
 import ViewerToolbar from '../components/viewer/ViewerToolbar'
 import ViewportGrid from '../components/viewer/ViewportGrid'
-import MprView from '../components/viewer/MprView'
+import MprView, { type MprViewHandle } from '../components/viewer/MprView'
 import { getInstances, getSeries, getStudy } from '../lib/pacs/apiClient'
 import { isMprCapable } from '../lib/volumeLoader'
+import { getRenderingEngine, type MeasurementToolName } from '../lib/cornerstoneSetup'
 import type { SeriesRecord, StudyRecord } from '../types/dicom'
 
 export default function ViewerPage() {
@@ -26,12 +27,14 @@ export default function ViewerPage() {
     cells,
     setCellImageLayout,
     assignSeriesToActiveCell,
+    assignSeriesToCell,
     activeCellIndex,
     activateTile,
     cellOverlays,
     activeOverlay,
     handleTileOverlay,
     handleIndexChanged,
+    scrollCellToIndex,
     navBindings,
     updateNavBindings,
     activeMeasurementTool,
@@ -54,6 +57,13 @@ export default function ViewerPage() {
     setCineLoop,
     setSimultaneousPlay,
     handleCineStateChanged,
+    syncEnabled,
+    toggleSync,
+    handleCameraModified,
+    handleVoiModified,
+    handleStackNewImage,
+    explodedCellIndex,
+    toggleExplodeCell,
   } = useDicomLayout()
 
   useEffect(() => {
@@ -140,9 +150,71 @@ export default function ViewerPage() {
     : null
   const mprCapable = activeSeries ? isMprCapable(activeSeries) : false
 
+  const mprViewRef = useRef<MprViewHandle | null>(null)
+  const preMprMeasurementToolRef = useRef<MeasurementToolName | null>(null)
+
   const handleToggleMpr = useCallback(() => {
-    setMprActive((prev) => !prev)
-  }, [])
+    setMprActive((prev) => {
+      const next = !prev
+      if (next) {
+        // Entering MPR: save any active measurement tool and pause cine if active
+        preMprMeasurementToolRef.current = activeMeasurementTool
+        if (activeMeasurementTool !== null) {
+          exitMeasurement()
+        }
+        if (explodedCellIndex !== null) {
+          toggleExplodeCell(explodedCellIndex)
+        }
+        if (simultaneousPlay ? isAnyCellPlaying : isActiveCellPlaying) {
+          togglePlayback()
+        }
+      } else {
+        // Exiting MPR: restore previously active measurement tool
+        if (preMprMeasurementToolRef.current !== null) {
+          selectMeasurementTool(preMprMeasurementToolRef.current)
+          preMprMeasurementToolRef.current = null
+        }
+        // Resize and refresh 2D viewports
+        requestAnimationFrame(() => {
+          const engine = getRenderingEngine()
+          if (engine) {
+            try {
+              engine.resize(true, true)
+              for (const cell of cells) {
+                const tileCount = cell.imageLayout.rows * cell.imageLayout.cols
+                for (let t = 0; t < tileCount; t++) {
+                  const vp = engine.getViewport(`${cell.id}__tile-${t}`)
+                  vp?.render()
+                }
+              }
+            } catch {
+              // ignore
+            }
+          }
+        })
+      }
+      return next
+    })
+  }, [
+    activeMeasurementTool,
+    exitMeasurement,
+    simultaneousPlay,
+    isAnyCellPlaying,
+    isActiveCellPlaying,
+    togglePlayback,
+    selectMeasurementTool,
+    cells,
+    explodedCellIndex,
+    toggleExplodeCell,
+  ])
+
+  const handleReset = useCallback(() => {
+    if (mprActive) {
+      mprViewRef.current?.resetView()
+    } else {
+      resetActiveView()
+    }
+  }, [mprActive, resetActiveView])
 
   const handleActiveCellImageLayoutChange = (layout: typeof activeCellImageLayout) => {
     setCellImageLayout(activeCellIndex, layout)
@@ -158,6 +230,21 @@ export default function ViewerPage() {
       setError(err instanceof Error ? err.message : 'Unable to load series.')
     }
   }, [assignSeriesToActiveCell, loadSeriesInstances])
+
+  const handleAssignSeriesToCell = useCallback(
+    async (cellIndex: number, seriesInstanceUID: string) => {
+      try {
+        setError(null)
+        const selected = series.find((s) => s.seriesInstanceUID === seriesInstanceUID)
+        if (!selected) return
+        const hydrated = await loadSeriesInstances(selected)
+        assignSeriesToCell(cellIndex, hydrated.seriesInstanceUID)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to load series.')
+      }
+    },
+    [series, loadSeriesInstances, assignSeriesToCell],
+  )
 
   if (error && !study) {
     return (
@@ -226,7 +313,7 @@ export default function ViewerPage() {
           invert={activeOverlay.invert}
           navBindings={navBindings}
           onNavBindingsChange={updateNavBindings}
-          onReset={resetActiveView}
+          onReset={handleReset}
           onToggleInvert={toggleInvertActive}
           activeMeasurementTool={activeMeasurementTool}
           onSelectMeasurementTool={selectMeasurementTool}
@@ -245,6 +332,8 @@ export default function ViewerPage() {
           mprActive={mprActive}
           onToggleMpr={handleToggleMpr}
           mprCapable={mprCapable}
+          syncEnabled={syncEnabled}
+          onToggleSync={toggleSync}
         />
       </div>
 
@@ -264,7 +353,10 @@ export default function ViewerPage() {
           <SeriesPanel
             series={series}
             activeSeriesUID={activeCell?.seriesInstanceUID ?? null}
+            studyUID={studyInstanceUID}
+            cellCount={cells.length}
             onSelect={handleSeriesSelect}
+            onAssignSeriesToCell={handleAssignSeriesToCell}
             onClose={() => setSeriesPanelOpen(false)}
           />
         </div>
@@ -276,25 +368,41 @@ export default function ViewerPage() {
                 {loading ? 'Loading study…' : 'Initializing viewer…'}
               </p>
             </div>
-          ) : mprActive && activeSeries ? (
-            <MprView
-              series={activeSeries}
-              study={{ ...study, series }}
-            />
           ) : (
-            <ViewportGrid
-              cells={cells}
-              outerLayout={outerLayout}
-              study={{ ...study, series }}
-              activeCellIndex={activeCellIndex}
-              cellOverlays={cellOverlays}
-              onActivateTile={activateTile}
-              onTileOverlay={handleTileOverlay}
-              onIndexChanged={handleIndexChanged}
-              onCineStateChanged={handleCineStateChanged}
-              onViewportReady={registerViewport}
-              onViewportRemoved={unregisterViewport}
-            />
+            <>
+              <div className={`h-full w-full ${mprActive ? 'hidden' : 'block'}`}>
+                <ViewportGrid
+                  cells={cells}
+                  outerLayout={outerLayout}
+                  study={{ ...study, series }}
+                  activeCellIndex={activeCellIndex}
+                  cellOverlays={cellOverlays}
+                  onActivateTile={activateTile}
+                  onTileOverlay={handleTileOverlay}
+                  onIndexChanged={handleIndexChanged}
+                  onCineStateChanged={handleCineStateChanged}
+                  onViewportReady={registerViewport}
+                  onViewportRemoved={unregisterViewport}
+                  onScrollToIndex={scrollCellToIndex}
+                  onAssignSeriesToCell={handleAssignSeriesToCell}
+                  explodedCellIndex={explodedCellIndex}
+                  onToggleExplode={toggleExplodeCell}
+                  onCameraModified={handleCameraModified}
+                  onVoiModified={handleVoiModified}
+                  onStackNewImage={handleStackNewImage}
+                />
+              </div>
+
+              {mprActive && activeSeries && (
+                <div className="h-full w-full">
+                  <MprView
+                    ref={mprViewRef}
+                    series={activeSeries}
+                    study={{ ...study, series }}
+                  />
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

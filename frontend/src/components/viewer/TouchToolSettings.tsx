@@ -4,6 +4,8 @@ import { NAV_TOOLS, type NavBindingConfig, type NavToolName } from '../../lib/co
 interface Props {
   bindings: NavBindingConfig
   onChange: (config: NavBindingConfig) => void
+  disabled?: boolean
+  disabledTooltip?: string
 }
 
 /** The three tools a single finger can drive (Zoom is excluded — it's
@@ -20,7 +22,7 @@ const TOUCH_TOOLS: {
 ]
 
 const itemClass = (active: boolean) =>
-  `flex w-14 shrink-0 touch-manipulation flex-col items-center gap-0.5 rounded-md px-1.5 py-1.5 text-[10px] font-medium transition-colors ${
+  `flex min-w-[3.25rem] shrink-0 touch-manipulation flex-col items-center justify-center gap-0.5 rounded-md px-1.5 py-1 text-[10px] font-medium leading-tight transition-colors ${
     active
       ? 'text-[var(--color-accent)]'
       : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]'
@@ -36,27 +38,33 @@ const itemClass = (active: boolean) =>
  * user-configurable, so it's shown as a static, non-interactive hint rather
  * than a fourth option here.
  */
-export default function TouchToolSettings({ bindings, onChange }: Props) {
+export default function TouchToolSettings({
+  bindings,
+  onChange,
+  disabled = false,
+  disabledTooltip,
+}: Props) {
   return (
     <div className="flex items-center gap-1">
       {TOUCH_TOOLS.map(({ tool, label, icon: Icon }) => (
         <button
           key={tool}
           type="button"
-          title={`One finger: ${label}`}
-          onClick={() => onChange({ ...bindings, left: tool })}
-          className={itemClass(bindings.left === tool)}
+          title={disabled ? (disabledTooltip ?? 'Touch tool disabled') : `One finger: ${label}`}
+          disabled={disabled}
+          onClick={() => !disabled && onChange({ ...bindings, left: tool })}
+          className={`${itemClass(bindings.left === tool && !disabled)} ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
         >
-          <Icon className="h-4 w-4" />
+          <Icon className="h-5 w-5" />
           {label}
         </button>
       ))}
 
       <div
-        title="Two fingers: pinch to zoom, drag to pan"
-        className="flex w-14 shrink-0 flex-col items-center gap-0.5 rounded-md px-1.5 py-1.5 text-[10px] font-medium text-[var(--color-text-dim)]"
+        title={disabled ? (disabledTooltip ?? 'Touch gestures disabled') : 'Two fingers: pinch to zoom, drag to pan'}
+        className={`flex min-w-[3.25rem] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-1.5 py-1 text-[10px] font-medium leading-tight text-[var(--color-text-dim)] ${disabled ? 'opacity-40' : ''}`}
       >
-        <ZoomIn className="h-4 w-4" />
+        <ZoomIn className="h-5 w-5" />
         Pinch
       </div>
     </div>

@@ -12,12 +12,16 @@ interface Props {
   cellIndex: number
   tileOffset: number
   series: SeriesRecord | null
+  initialImageIndex?: number
   onActivate: (cellIndex: number, tileOffset: number) => void
   onOverlay: (cellIndex: number, tileOffset: number, overlay: OverlayState) => void
   onIndexChanged: (cellIndex: number, tileOffset: number, newIndex: number) => void
   onCineStateChanged: (cellIndex: number, playing: boolean) => void
   onViewportReady: (tileId: string, viewport: StackViewport) => void
   onViewportRemoved: (tileId: string) => void
+  onCameraModified?: (tileId: string) => void
+  onVoiModified?: (tileId: string) => void
+  onStackNewImage?: (tileId: string) => void
 }
 
 export default function ViewportTile({
@@ -25,12 +29,16 @@ export default function ViewportTile({
   cellIndex,
   tileOffset,
   series,
+  initialImageIndex,
   onActivate,
   onOverlay,
   onIndexChanged,
   onCineStateChanged,
   onViewportReady,
   onViewportRemoved,
+  onCameraModified,
+  onVoiModified,
+  onStackNewImage,
 }: Props) {
   const elementRef = useRef<HTMLDivElement>(null)
 
@@ -45,6 +53,12 @@ export default function ViewportTile({
   onIndexChangedRef.current = onIndexChanged
   const onCineStateChangedRef = useRef(onCineStateChanged)
   onCineStateChangedRef.current = onCineStateChanged
+  const onCameraModifiedRef = useRef(onCameraModified)
+  onCameraModifiedRef.current = onCameraModified
+  const onVoiModifiedRef = useRef(onVoiModified)
+  onVoiModifiedRef.current = onVoiModified
+  const onStackNewImageRef = useRef(onStackNewImage)
+  onStackNewImageRef.current = onStackNewImage
 
   useEffect(() => {
     const element = elementRef.current
@@ -79,13 +93,22 @@ export default function ViewportTile({
     }
 
     const handleOverlayEvent = () => emitOverlay()
+    const handleCameraModified = () => {
+      emitOverlay()
+      onCameraModifiedRef.current?.(tileId)
+    }
+    const handleVoiModified = () => {
+      emitOverlay()
+      onVoiModifiedRef.current?.(tileId)
+    }
     const handleNewImage = () => {
       emitOverlay()
       onIndexChangedRef.current(cellIndex, tileOffset, viewport.getCurrentImageIdIndex())
+      onStackNewImageRef.current?.(tileId)
     }
     element.addEventListener(Events.STACK_NEW_IMAGE, handleNewImage as EventListener)
-    element.addEventListener(Events.VOI_MODIFIED, handleOverlayEvent as EventListener)
-    element.addEventListener(Events.CAMERA_MODIFIED, handleOverlayEvent as EventListener)
+    element.addEventListener(Events.VOI_MODIFIED, handleVoiModified as EventListener)
+    element.addEventListener(Events.CAMERA_MODIFIED, handleCameraModified as EventListener)
     element.addEventListener(Events.IMAGE_RENDERED, handleOverlayEvent as EventListener)
 
     // `pointerdown` (not `mousedown`) so tapping a tile activates it on
@@ -117,8 +140,10 @@ export default function ViewportTile({
       }
       const imageIds = await getSeriesImageIds(series)
       if (cancelled || imageIds.length === 0) return
-      const idx = Math.min(Math.max(tileOffset, 0), imageIds.length - 1)
-      await viewport.setStack(imageIds, idx)
+      const targetIdx = initialImageIndex !== undefined
+        ? Math.min(Math.max(initialImageIndex, 0), imageIds.length - 1)
+        : Math.min(Math.max(tileOffset, 0), imageIds.length - 1)
+      await viewport.setStack(imageIds, targetIdx)
       viewport.resetCamera()
       viewport.render()
       emitOverlay()
@@ -128,8 +153,8 @@ export default function ViewportTile({
     return () => {
       cancelled = true
       element.removeEventListener(Events.STACK_NEW_IMAGE, handleNewImage as EventListener)
-      element.removeEventListener(Events.VOI_MODIFIED, handleOverlayEvent as EventListener)
-      element.removeEventListener(Events.CAMERA_MODIFIED, handleOverlayEvent as EventListener)
+      element.removeEventListener(Events.VOI_MODIFIED, handleVoiModified as EventListener)
+      element.removeEventListener(Events.CAMERA_MODIFIED, handleCameraModified as EventListener)
       element.removeEventListener(Events.IMAGE_RENDERED, handleOverlayEvent as EventListener)
       element.removeEventListener('pointerdown', handleActivate)
       if (handleClipStarted) element.removeEventListener(CINE_EVENTS.CLIP_STARTED, handleClipStarted as EventListener)

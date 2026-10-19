@@ -9,6 +9,7 @@ import {
   exitMeasurementMode,
   getAnnotationCount,
   getNavBindings,
+  getRenderingEngine,
   onAnnotationsChanged,
   purgeFileManager,
   setNavBindings,
@@ -59,6 +60,17 @@ export function useDicomLayout() {
   const [cineFps, setCineFpsState] = useState(10)
   const [cineLoop, setCineLoopState] = useState(true)
   const [simultaneousPlay, setSimultaneousPlayState] = useState(false)
+
+  // --- Viewport Synchronization ---
+  const [syncEnabled, setSyncEnabled] = useState(false)
+  const syncEnabledRef = useRef(syncEnabled)
+  syncEnabledRef.current = syncEnabled
+  const isSyncingRef = useRef(false)
+  const playingCellsRef = useRef(playingCells)
+  playingCellsRef.current = playingCells
+
+  // --- Double-Click-To-Explode (1x1 full viewport view) ---
+  const [explodedCellIndex, setExplodedCellIndex] = useState<number | null>(null)
 
   const viewportsRef = useRef<Map<string, StackViewport>>(new Map())
   const cellsRef = useRef<CellState[]>(cells)
@@ -111,6 +123,7 @@ export function useDicomLayout() {
   const activeTileId = `${cells[activeCellIndex]?.id ?? 'cell-0'}__tile-${activeTileIndex}`
 
   const setOuterLayout = useCallback((layout: GridSize) => {
+    setExplodedCellIndex(null)
     setCells((prev) => {
       const next = makeCells(layout, prev)
       cellBaseIndexRef.current = next.map((_, i) => cellBaseIndexRef.current[i] ?? 0)
@@ -151,22 +164,28 @@ export function useDicomLayout() {
     }
   }, [])
 
-  const assignSeriesToActiveCell = useCallback(
-    (series: SeriesRecord) => {
-      const cellIndex = activeCellIndexRef.current
+  const assignSeriesToCell = useCallback(
+    (cellIndex: number, seriesInstanceUID: string) => {
       setCells((prev) =>
         prev.map((cell, idx) =>
-          idx === cellIndex ? { ...cell, seriesInstanceUID: series.seriesInstanceUID } : cell
+          idx === cellIndex ? { ...cell, seriesInstanceUID } : cell
         )
       )
       cellBaseIndexRef.current[cellIndex] = 0
       setCellOverlays((prev) => prev.map((o, idx) => (idx === cellIndex ? INITIAL_OVERLAY : o)))
-      // Same reasoning as above: a new series remounts tile 0, which stops
-      // any cine that was running on the old one.
       setPlayingCells((prev) => prev.map((p, idx) => (idx === cellIndex ? false : p)))
-      setActiveTileIndex(0)
+      if (cellIndex === activeCellIndexRef.current) {
+        setActiveTileIndex(0)
+      }
     },
     []
+  )
+
+  const assignSeriesToActiveCell = useCallback(
+    (series: SeriesRecord) => {
+      assignSeriesToCell(activeCellIndexRef.current, series.seriesInstanceUID)
+    },
+    [assignSeriesToCell]
   )
 
   const activateTile = useCallback((cellIndex: number, tileOffset: number) => {
@@ -217,6 +236,190 @@ export function useDicomLayout() {
       }
     }
   }, [])
+
+  const handleCameraModified = useCallback((sourceTileId: string) => {
+    if (!syncEnabledRef.current || isSyncingRef.current) return
+    const sourceVp = viewportsRef.current.get(sourceTileId)
+    if (!sourceVp) return
+    isSyncingRef.current = true
+    try {
+      const zoom = sourceVp.getZoom()
+      const pan = sourceVp.getPan()
+      for (const [id, targetVp] of viewportsRef.current.entries()) {
+        if (id === sourceTileId) continue
+        if (targetVp.getImageIds().length === 0) continue
+        targetVp.setZoom(zoom)
+        targetVp.setPan(pan)
+        targetVp.render()
+      }
+    } catch {
+      // ignore
+    } finally {
+      isSyncingRef.current = false
+    }
+  }, [])
+
+  const handleVoiModified = useCallback((sourceTileId: string) => {
+    if (!syncEnabledRef.current || isSyncingRef.current) return
+    const sourceVp = viewportsRef.current.get(sourceTileId)
+    if (!sourceVp) return
+    isSyncingRef.current = true
+    try {
+      const props = sourceVp.getProperties()
+      if (!props.voiRange) return
+      for (const [id, targetVp] of viewportsRef.current.entries()) {
+        if (id === sourceTileId) continue
+        if (targetVp.getImageIds().length === 0) continue
+        targetVp.setProperties({
+          voiRange: { ...props.voiRange },
+          invert: props.invert,
+        })
+        targetVp.render()
+      }
+    } catch {
+      // ignore
+    } finally {
+      isSyncingRef.current = false
+    }
+  }, [])
+
+  const handleStackNewImage = useCallback((sourceTileId: string) => {
+    if (!syncEnabledRef.current || isSyncingRef.current) return
+    if (playingCellsRef.current.some(Boolean)) return
+    const sourceVp = viewportsRef.current.get(sourceTileId)
+    if (!sourceVp) return
+    const sourceImages = sourceVp.getImageIds()
+    if (sourceImages.length <= 1) return
+
+    isSyncingRef.current = true
+    try {
+      const sourceIdx = sourceVp.getCurrentImageIdIndex()
+      const ratio = sourceIdx / (sourceImages.length - 1)
+
+      for (const [id, targetVp] of viewportsRef.current.entries()) {
+        if (id === sourceTileId) continue
+        const targetImages = targetVp.getImageIds()
+        if (targetImages.length <= 1) continue
+        const targetIdx = Math.round(ratio * (targetImages.length - 1))
+        if (targetVp.getCurrentImageIdIndex() !== targetIdx) {
+          targetVp.setImageIdIndex(targetIdx).catch(() => {})
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      setTimeout(() => {
+        isSyncingRef.current = false
+      }, 50)
+    }
+  }, [])
+
+  const toggleSync = useCallback(() => {
+    setSyncEnabled((prev) => {
+      const next = !prev
+      if (next) {
+        // Immediately sync from current active tile to other loaded viewports
+        const currentActiveCell = cellsRef.current[activeCellIndexRef.current]
+        const activeTile = `${currentActiveCell?.id ?? 'cell-0'}__tile-${activeTileIndexRef.current}`
+        const activeVp = viewportsRef.current.get(activeTile)
+        if (activeVp && activeVp.getImageIds().length > 0) {
+          isSyncingRef.current = true
+          try {
+            const zoom = activeVp.getZoom()
+            const pan = activeVp.getPan()
+            const props = activeVp.getProperties()
+            const images = activeVp.getImageIds()
+            const idx = activeVp.getCurrentImageIdIndex()
+            const ratio = images.length > 1 ? idx / (images.length - 1) : 0
+
+            for (const [id, targetVp] of viewportsRef.current.entries()) {
+              if (id === activeTile) continue
+              const targetImages = targetVp.getImageIds()
+              if (targetImages.length === 0) continue
+              targetVp.setZoom(zoom)
+              targetVp.setPan(pan)
+              if (props.voiRange) {
+                targetVp.setProperties({ voiRange: { ...props.voiRange }, invert: props.invert })
+              }
+              if (targetImages.length > 1 && ratio > 0) {
+                const targetIdx = Math.round(ratio * (targetImages.length - 1))
+                targetVp.setImageIdIndex(targetIdx).catch(() => {})
+              }
+              targetVp.render()
+            }
+          } catch {
+            // ignore
+          } finally {
+            setTimeout(() => {
+              isSyncingRef.current = false
+            }, 50)
+          }
+        }
+      } else {
+        isSyncingRef.current = false
+      }
+      return next
+    })
+  }, [])
+
+  // --- Double-Click-To-Explode (1x1 full viewport view) ---
+
+  const toggleExplodeCell = useCallback((cellIndex: number) => {
+    const isSingleOuter = outerLayout.rows === 1 && outerLayout.cols === 1
+    const cell = cellsRef.current[cellIndex]
+    const isSingleTile = !cell || (cell.imageLayout.rows === 1 && cell.imageLayout.cols === 1)
+    if (isSingleOuter && isSingleTile) {
+      return
+    }
+
+    setExplodedCellIndex((current) => {
+      const next = current === cellIndex ? null : cellIndex
+      if (next !== null) {
+        setActiveCellIndex(cellIndex)
+      }
+      requestAnimationFrame(() => {
+        const engine = getRenderingEngine()
+        if (engine) {
+          try {
+            engine.resize(true, true)
+            for (const c of cellsRef.current) {
+              const tileCount = c.imageLayout.rows * c.imageLayout.cols
+              for (let t = 0; t < tileCount; t++) {
+                const vp = engine.getViewport(`${c.id}__tile-${t}`)
+                vp?.render()
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+      })
+      return next
+    })
+  }, [outerLayout.rows, outerLayout.cols])
+
+  const scrollCellToIndex = useCallback(
+    (cellIndex: number, newIndex: number) => {
+      const cell = cellsRef.current[cellIndex]
+      if (!cell) return
+      const tile0Id = `${cell.id}__tile-0`
+      const vp = viewportsRef.current.get(tile0Id)
+      if (!vp) return
+      const imageIds = vp.getImageIds()
+      if (imageIds.length === 0) return
+      const targetIdx = Math.min(Math.max(newIndex, 0), imageIds.length - 1)
+      if (vp.getCurrentImageIdIndex() !== targetIdx) {
+        vp.setImageIdIndex(targetIdx)
+          .then(() => {
+            if (syncEnabledRef.current) {
+              handleStackNewImage(tile0Id)
+            }
+          })
+          .catch(() => {})
+      }
+    },
+    [handleStackNewImage],
+  )
 
   const updateNavBindings = useCallback((config: NavBindingConfig) => {
     setNavBindings(config)
@@ -402,6 +605,7 @@ export function useDicomLayout() {
     cells,
     setCellImageLayout,
     assignSeriesToActiveCell,
+    assignSeriesToCell,
     activeCellIndex,
     activeTileIndex,
     activateTile,
@@ -409,6 +613,7 @@ export function useDicomLayout() {
     activeOverlay: cellOverlays[activeCellIndex] ?? INITIAL_OVERLAY,
     handleTileOverlay,
     handleIndexChanged,
+    scrollCellToIndex,
     navBindings,
     updateNavBindings,
     activeMeasurementTool,
@@ -421,6 +626,17 @@ export function useDicomLayout() {
     toggleInvertActive,
     registerViewport,
     unregisterViewport,
+    // sync
+    syncEnabled,
+    toggleSync,
+    setSyncEnabled,
+    handleCameraModified,
+    handleVoiModified,
+    handleStackNewImage,
+    // explode
+    explodedCellIndex,
+    toggleExplodeCell,
+    setExplodedCellIndex,
     // cine
     playingCells,
     isActiveCellPlaying: playingCells[activeCellIndex] ?? false,

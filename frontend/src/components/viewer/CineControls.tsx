@@ -11,10 +11,12 @@ interface Props {
   onLoopChange: (loop: boolean) => void
   simultaneous: boolean
   onSimultaneousChange: (value: boolean) => void
+  disabled?: boolean
+  disabledTooltip?: string
 }
 
 const itemClass = (active: boolean) =>
-  `flex w-14 shrink-0 touch-manipulation flex-col items-center gap-0.5 rounded-md px-1.5 py-1.5 text-[10px] font-medium transition-colors ${
+  `flex min-w-[3.25rem] shrink-0 touch-manipulation flex-col items-center justify-center gap-0.5 rounded-md px-1.5 py-1 text-[10px] font-medium leading-tight transition-colors ${
     active
       ? 'text-[var(--color-accent)]'
       : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]'
@@ -72,6 +74,8 @@ export default function CineControls({
   onLoopChange,
   simultaneous,
   onSimultaneousChange,
+  disabled = false,
+  disabledTooltip,
 }: Props) {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -80,29 +84,31 @@ export default function CineControls({
     <div className="flex shrink-0 items-center">
       <button
         type="button"
-        title={isPlaying ? 'Pause cine' : 'Play cine'}
-        onClick={onTogglePlayback}
-        className={itemClass(isPlaying)}
+        title={disabled ? (disabledTooltip ?? 'Cine playback is disabled') : isPlaying ? 'Pause cine' : 'Play cine'}
+        onClick={!disabled ? onTogglePlayback : undefined}
+        disabled={disabled}
+        className={`${itemClass(isPlaying && !disabled)} ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
       >
-        {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+        {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
         {isPlaying ? 'Pause' : 'Play'}
       </button>
 
       <button
         ref={triggerRef}
         type="button"
-        title="Cine settings"
+        title={disabled ? (disabledTooltip ?? 'Cine playback is disabled') : 'Cine settings'}
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className={`flex w-6 shrink-0 touch-manipulation items-center justify-center self-stretch rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] ${
+        disabled={disabled}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        className={`flex w-5 shrink-0 touch-manipulation items-center justify-center self-stretch rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] ${
           open ? 'text-[var(--color-accent)]' : ''
-        }`}
+        } ${disabled ? 'cursor-not-allowed opacity-40 pointer-events-none' : ''}`}
       >
-        <ChevronDown className="h-3.5 w-3.5" />
+        <ChevronDown className="h-4 w-4" />
       </button>
 
-      <AnchoredPopover open={open} anchorRef={triggerRef} onClose={() => setOpen(false)} align="end">
+      <AnchoredPopover open={open && !disabled} anchorRef={triggerRef} onClose={() => setOpen(false)} align="end">
         <div className="w-56 max-w-[85vw] rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface-raised)] p-3 shadow-2xl">
           <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text)]">
             Cine

@@ -10,10 +10,12 @@ interface Props {
   onOuterLayoutChange: (layout: GridSize) => void
   onImageLayoutChange: (layout: GridSize) => void
   label?: string
+  disabled?: boolean
+  disabledTooltip?: string
 }
 
 const itemClass = (active: boolean) =>
-  `flex w-14 shrink-0 touch-manipulation flex-col items-center gap-0.5 rounded-md px-1.5 py-1.5 text-[10px] font-medium transition-colors ${
+  `flex min-w-[3.25rem] shrink-0 touch-manipulation flex-col items-center justify-center gap-0.5 rounded-md px-1.5 py-1 text-[10px] font-medium leading-tight transition-colors ${
     active
       ? 'text-[var(--color-accent)]'
       : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]'
@@ -102,6 +104,8 @@ export default function LayoutPicker({
   onOuterLayoutChange,
   onImageLayoutChange,
   label = 'Layout',
+  disabled = false,
+  disabledTooltip,
 }: Props) {
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -112,13 +116,14 @@ export default function LayoutPicker({
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => setOpen((current) => !current)}
-        title={label}
+        onClick={() => !disabled && setOpen((current) => !current)}
+        title={disabled ? (disabledTooltip ?? label) : label}
+        disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className={itemClass(open)}
+        className={`${itemClass(open)} ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
       >
-        <LayoutGrid className="h-4 w-4" />
+        <LayoutGrid className="h-5 w-5" />
 
         <span>
           {outerLayout.rows}×{outerLayout.cols}
@@ -131,7 +136,7 @@ export default function LayoutPicker({
           mobile/tablet. The Viewport Grid and Active Cell selectors stay
           side-by-side in one panel (no tab/toggle between them) so both are
           reachable in a single tap. */}
-      <AnchoredPopover open={open} anchorRef={buttonRef} onClose={() => setOpen(false)} align="center">
+      <AnchoredPopover open={open && !disabled} anchorRef={buttonRef} onClose={() => setOpen(false)} align="center">
         <div className="w-max max-w-[92vw] rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface-raised)] p-3 shadow-2xl">
           <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text)]">
             {label}

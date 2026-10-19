@@ -181,6 +181,157 @@ Extends the DICOM viewer with fully functional Multi-Planar Reconstruction (MPR)
 - `frontend/tsconfig.app.json`: Excluded test files from production application build bundle.
 
 ## Validation Results
-- **Unit Tests**: `node --experimental-strip-types --test src/lib/*.test.ts` passed (3/3 tests passing: volume ID determinism, slice threshold checks, and DICOM orientation matrix math).
-- **Linter**: `oxlint src` passed with 0 errors.
+- **Unit Tests**: `node --experimental-strip-types --test src/lib/*.test.ts` passed (6/6 tests passing: volume ID determinism, slice threshold checks, DICOM orientation matrix math, independent mouse button configuration, MPR tool availability rules, and layout state preservation).
+- **Linter**: `oxlint src` passed with 0 errors (1 pre-existing warning in `useDicomLayout.ts`).
 - **Build**: `tsc -b && vite build` passed and produced production bundle cleanly.
+
+---
+
+# MPR lifecycle, tool availability, and mouse settings improvements: change summary
+
+Refines Multi-Planar Reconstruction (MPR) integration, tool availability safeguards, layout preservation, and mouse-button configuration UI.
+
+## Improvements Implemented
+
+1. **Clear MPR Exit and Exact Layout Restoration**:
+   - Added prominent "Exit MPR" buttons in `MprView` (top-right overlay button and info pane action button) as well as an "Exit MPR" state on the `ViewerToolbar` toggle with accent highlighting.
+   - Preserved `ViewportGrid` DOM elements and state during MPR mode via CSS visibility toggle rather than destroying/recreating them.
+   - Added `initialImageIndex` propagation to `ViewportTile` and `ViewportGrid` so each cell's exact slice index is retained.
+   - On exiting MPR, all 2D viewports resume their exact previous layout (`outerLayout` grid configuration, active cell index, sub-grid tile offset, zoom/pan, window/level, and scroll position) without resetting to defaults.
+   - Triggered `engine.resize(true, true)` on `getRenderingEngine()` after unhiding to cleanly refresh canvas dimensions.
+
+2. **Accurate MPR Tool Availability & State Restoration**:
+   - Disabled unsupported tools in MPR mode: Invert, LayoutPicker, CineControls, Stack/Navigate, all Measurement tools (Length, Angle, Cobb, Bidirect, Rect, Ellipse, Circle, Freehand, Arrow, Probe, Eraser), Delete, Clear all, and Mouse/Touch bindings.
+   - Provided informative tooltips explaining why each tool is disabled in MPR mode (e.g., "Layout is fixed to tri-planar orthogonal view in MPR mode", "Cine playback is not supported in MPR mode").
+   - Wired `Reset` in MPR mode to reset all three orthogonal viewports' camera and viewports via `mprViewRef.current?.resetView()`.
+   - Paused cine playback automatically upon entering MPR if running.
+   - Saved active measurement tool upon entering MPR and restored it automatically upon exiting MPR.
+
+3. **Compact Mouse-Button Configuration Popover**:
+   - Replaced three separate toolbar slot buttons (Left, Middle, Right) with a single compact "Mouse" toolbar control.
+   - Click opens an anchored popover dialog (`AnchoredPopover`) with clean, independent dropdowns for Left, Middle, and Right mouse buttons (`Window / Level`, `Pan`, `Zoom`, `Stack Scroll`).
+   - Preserved 100% of existing configuration behavior, local storage persistence, and tool group updates.
+   - Provided proper disabled state and tooltip for mouse settings when MPR is active.
+
+## Validation Results
+
+| Test / Check | Result |
+|---|---|
+| Unit tests (`node --experimental-strip-types --test src/lib/*.test.ts`) | 6/6 passed (volume ID, slice threshold, orientation math, mouse bindings, MPR tool availability, layout preservation) |
+| Linter (`oxlint src`) | 0 errors |
+| TypeScript check (`tsc -b`) | 0 errors |
+| Vite production build (`vite build`) | Succeeded cleanly (all assets and workers bundled) |
+
+---
+
+# Single-row toolbar with readable icons, 2D vertical stack slider, and MPR crosshair navigation: change summary
+
+Implements single-row toolbar layout with readable `h-5 w-5` (20px) icons and `text-[10px]` labels, removes sliders from MPR (relying exclusively on synchronized crosshairs), and adds a dedicated vertical stack slider to the 2D viewer.
+
+## Improvements Implemented
+
+1. **Comfortable, Single-Row Toolbar with Clear Icons (`ViewerToolbar.tsx`)**:
+   - Resized all toolbar icons from `h-3.5 w-3.5` (14px) to prominent `h-5 w-5` (20px) icons for crisp visibility and comfortable touch/click targets.
+   - Raised button label typography to `text-[10px] font-medium leading-tight` and set button minimum width to `min-w-[3.25rem]` with `px-1.5 py-1` padding.
+   - Maintained strict single-row layout without line breaks or wrapping across desktop and mobile (`flex-nowrap items-center overflow-x-auto overflow-y-hidden gap-1`).
+   - Applied identical `h-5 w-5` icon sizing and typography to companion controls (`LayoutPicker.tsx`, `CineControls.tsx`, `MouseBindingSettings.tsx`, `TouchToolSettings.tsx`).
+
+2. **2D Normal Viewer Vertical Stack Slider (`VerticalStackSlider.tsx`, `ViewportGrid.tsx`, `useDicomLayout.ts`)**:
+   - Added a dedicated vertical stack slider component (`VerticalStackSlider.tsx`) docked to the right edge of each 2D cell showing a series with $>1$ image.
+   - Wired `scrollCellToIndex` in `useDicomLayout.ts` to `setImageIdIndex` on tile 0, which automatically triggers `STACK_NEW_IMAGE`, synchronizes sibling tiles if the cell is sub-divided, and updates overlay position.
+   - Supports fluid pointer drag with pointer capture and floating `${safeCurrent} / ${max}` tooltip, mouse wheel scrolling (`deltaY`), and keyboard stepping (`ArrowDown`/`PageDown` down to max, `ArrowUp`/`PageUp` up to 0, `Home`/`End`).
+   - Positioned at `right-1.5 top-14 bottom-14` to avoid overlapping top-right (modality & plane) or bottom-right (WW/WL and zoom) overlay text.
+   - Configured with natural top-to-bottom direction: top of the scrollbar has `0` as initial value, advancing downwards to total image count `max` (e.g. 117) at the bottom.
+   - Rendered with a transparent background (no container box, borders, or track line) so only the draggable accent-colored thumb pill and high-contrast image count labels (top current slice starting at `0`, bottom total count `max`, and hover/drag tooltip) are visible over the DICOM image.
+
+3. **MPR Navigation Simplified (`MprView.tsx`)**:
+   - Removed vertical slice sliders from MPR viewports as requested.
+   - Relies cleanly on synchronized orthogonal crosshairs for tri-planar spatial navigation across Axial, Sagittal, and Coronal views.
+   - Preserves single toolbar toggle (`Box` icon) as the sole entry and exit control, restoring previous 2D layout and active cell image indices.
+
+## Validation Results
+
+| Test / Check | Result |
+|---|---|
+| Unit tests (`node --experimental-strip-types --test src/lib/*.test.ts`) | 9/9 passed (volume ID, slice threshold, orientation math, mouse bindings, MPR tool availability, layout preservation, 2D vertical stack slider pointer calculations & clamping with top=0 and bottom=max, wheel/keyboard stepping, single-toggle MPR exit) |
+| Linter (`oxlint src`) | 0 errors (1 pre-existing warning in `useDicomLayout.ts`) |
+| TypeScript build check (`tsc -b`) | 0 errors |
+| Vite production bundle (`vite build`) | Succeeded cleanly in 5.99s (all assets, workers, and WASM modules bundled) |
+
+---
+
+# Series thumbnails, drag-and-drop viewport targeting, and 1-based scrollbar indexing: change summary
+
+Enhances the left-side series panel with representative DICOM thumbnails and cross-platform drag-and-drop series loading onto any viewport cell, and corrects the 2D vertical stack slider to use 1-based indexing (`1` at top, `max` at bottom).
+
+## Improvements Implemented
+
+1. **Representative Series Thumbnails (`SeriesThumbnail.tsx`, `SeriesPanel.tsx`)**:
+   - Added `SeriesThumbnail` component that displays a square thumbnail for each series alongside its description, series number, and image count.
+   - Generates thumbnails using Cornerstone's `utilities.loadImageToCanvas` with CPU rendering and `thumbnail: true`.
+   - **Zero-waste loading**: Rather than downloading entire series stacks, it fetches only the series instances metadata (if not already hydrated) and loads only the single representative middle slice (`Math.floor(instances.length / 2)`).
+   - In-memory data URL caching (`thumbnailCache`) ensures each thumbnail renders once and reuses its cached image across re-renders.
+   - Visual feedback: Animated loading spinner/skeleton while loading; clean fallback badge showing the series modality (e.g., CT, MR, OT) if an image fails to load or has 0 instances.
+
+2. **Drag-and-Drop Series onto Any Viewport (`SeriesPanel.tsx`, `ViewportGrid.tsx`, `useDicomLayout.ts`, `ViewerPage.tsx`)**:
+   - **Desktop HTML5 Drag-and-Drop**: Each series card in `SeriesPanel` is draggable (`draggable={true}`) with a grip handle affordance (`GripVertical`). Dragging sets data transfer MIME `application/dicom-series`.
+   - **Touch Device Drag-and-Drop**: Implemented pointer-event touch drag tracking (`pointerdown`, `pointermove`, `pointerup`). While dragging on touch devices, a floating drag badge follows the user's touch and detects the hovered viewport cell using `document.elementFromPoint` against `data-cell-index`.
+   - **Visual Feedback for Drop Targets**: Viewport cells listen for both HTML5 drag-over and touch drag-over events. When hovered during a drag operation, the targeted viewport displays an accent-bordered highlight overlay (`border-2 border-[var(--color-accent)] ring-2 bg-[var(--color-accent)]/20`) with a clear badge: *"Drop to load series in Viewport X"*.
+   - **Targeted Cell Assignment**: Implemented `assignSeriesToCell(cellIndex, seriesInstanceUID)` in `useDicomLayout.ts` and `ViewerPage.tsx`. When a series is dropped, it loads and renders solely in that targeted cell. All other viewport cells, their assigned series, sub-layouts, and the overall outer layout are strictly preserved.
+   - **Touch Quick-Assign Buttons**: For mobile/tablet drawers and multi-cell grids, series cards also feature quick-target buttons (`V1`, `V2`, etc.) enabling instant assignment to any viewport cell with a single tap.
+   - **Click/Tap Selection Preserved**: Clicking or tapping a series card without dragging continues to load the series into the currently active viewport.
+
+3. **1-Based Vertical Stack Slider (`VerticalStackSlider.tsx`)**:
+   - Corrected vertical stack slider count: Top position displays initial count `1` (or `0` if empty), and bottom position displays total image count `max` (e.g. `117`).
+   - Floating tooltip and aria values reflect 1-based indexing: `${safeCurrent + 1} / ${max}` (e.g., `1 / 117` at top, `117 / 117` at bottom).
+   - Maintained transparent background styling with only the draggable thumb and high-contrast numerical indicators visible.
+
+## Validation Results
+
+| Test / Check | Result |
+|---|---|
+| Unit tests (`node --experimental-strip-types --test src/lib/*.test.ts`) | 11/11 passed (all 9 previous tests + series drag-and-drop targeting preserving other cells/layouts + representative thumbnail slice selection math) |
+| Linter (`oxlint src`) | 0 errors (1 pre-existing warning in `useDicomLayout.ts`) |
+| TypeScript check (`tsc -b`) | 0 errors |
+| Vite production build (`vite build`) | Succeeded cleanly in 14.42s (all assets, workers, and WASM modules bundled) |
+
+---
+
+# Viewport synchronization (Sync toggle) and double-click-to-explode: change summary
+
+Implements viewport synchronization across 2D viewports with recursion prevention and independent restoration, alongside double-click-to-explode behavior for instant 1×1 expansion and exact layout restoration without reloading images.
+
+## Improvements Implemented
+
+1. **Toolbar Sync Toggle & Cross-Viewport Synchronization (`ViewerToolbar.tsx`, `useDicomLayout.ts`, `ViewportGrid.tsx`, `ViewportTile.tsx`)**:
+   - Added a `Sync` toggle button with `Link2` icon to the toolbar, complete with active styling (`ring-1 ring-[var(--color-accent)] bg-[var(--color-accent)]/15 font-semibold text-[var(--color-accent)]`).
+   - When enabled, synchronizes compatible operations across all loaded 2D viewports:
+     - **Zoom & Pan**: Synchronizes canvas zoom factor (`getZoom()`, `setZoom()`) and canvas pan offsets (`getPan()`, `setPan()`) on `CAMERA_MODIFIED`.
+     - **Window / Level (VOI)**: Synchronizes `voiRange` and invert properties across all viewports with loaded series on `VOI_MODIFIED`.
+     - **Stack Navigation**: Synchronizes relative slice progression (`sourceIndex / (sourceCount - 1)`) across multi-slice series on `STACK_NEW_IMAGE` and vertical stack slider scrolling.
+   - **Loop Prevention**: Uses an internal `isSyncingRef` re-entrancy lock during sync dispatches so updates to target viewports do not echo back or trigger infinite cascade cycles.
+   - **Incompatible Viewport Safeguards**: Safely ignores empty viewports and skips stack scrolling on single-image series (e.g. X-rays, scout scans) to avoid errors or invalid slice requests.
+   - **Play All Cine Preserved**: Checks `playingCells` and bypasses stack navigation sync during active playback so multi-series cine continues to play smoothly at configured frame rates.
+   - **Immediate Independent Restoration**: Disabling Sync instantly unlinks all viewports; subsequent zoom, pan, window/level, and slice scrolling operations apply strictly to the user-manipulated viewport.
+   - **MPR Mode Handling**: Disabled in MPR mode with tooltip explaining that orthogonal plane synchronization is automatically managed by crosshairs.
+
+2. **Double-Click-To-Explode (`ViewportGrid.tsx`, `useDicomLayout.ts`, `ViewerPage.tsx`)**:
+   - **1×1 Expansion**: Double-clicking any image viewport expands that specific cell into a 1×1 layout occupying the entire available viewer area. Also sets that cell as the active viewport.
+   - **Exact Layout Restoration**: Double-clicking the same exploded viewport again immediately restores the exact previous layout, including grid dimensions (`outerLayout`), cell sub-layouts, image assignments, and active cell index.
+   - **Touch Double-Tap Support**: Implemented double-tap recognition within 300ms on touch devices so tablet and mobile users can explode and restore viewports with equal ease.
+   - **Zero-Reload In-Memory State**: Non-exploded cells are toggled with CSS `display: none` rather than unmounting. The Cornerstone StackViewport instances, WebGL contexts, image stacks, and camera states remain completely intact in memory without reloading images or refetching DICOM objects over the network.
+   - **Canvas Readjustment**: Calls `renderingEngine.resize(true, true)` on `requestAnimationFrame` upon entering and exiting exploded view so viewport canvas buffers resize and render sharply to the available dimensions.
+   - **Exploded View Status Badge**: Exploded view includes a subtle non-obstructive overlay pill in the upper-left corner: *"1×1 Exploded (Double-click to restore)"*.
+
+## Validation Results
+
+| Test / Check | Result |
+|---|---|
+| Unit tests (`node --experimental-strip-types --test src/lib/*.test.ts`) | 13/13 passed (all 11 previous tests + Sync toggle state/loop prevention/independent restoration + double-click explode/restore/repeated toggling) |
+| Linter (`oxlint src`) | 0 errors (1 pre-existing warning in `useDicomLayout.ts`) |
+| TypeScript build check (`tsc -b`) | 0 errors |
+| Vite production bundle (`vite build`) | Succeeded cleanly in 38.54s (all assets, workers, and WASM modules bundled) |
+
+
+
+

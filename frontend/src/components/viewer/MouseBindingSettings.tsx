@@ -11,6 +11,8 @@ import AnchoredPopover from './AnchoredPopover'
 interface Props {
   bindings: NavBindingConfig
   onChange: (config: NavBindingConfig) => void
+  disabled?: boolean
+  disabledTooltip?: string
 }
 
 const TOOL_LABELS: Record<NavToolName, string> = {
@@ -45,115 +47,99 @@ const SLOTS: {
 const TOOL_OPTIONS = Object.values(NAV_TOOLS)
 
 const itemClass = (active: boolean) =>
-  `flex w-14 shrink-0 touch-manipulation flex-col items-center gap-0.5 rounded-md px-1.5 py-1.5 text-[10px] font-medium transition-colors ${
+  `flex min-w-[3.25rem] shrink-0 touch-manipulation flex-col items-center justify-center gap-0.5 rounded-md px-1.5 py-1 text-[10px] font-medium leading-tight transition-colors ${
     active
       ? 'text-[var(--color-accent)]'
       : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]'
   }`
 
-interface SlotButtonProps {
-  label: string
-  shortLabel: string
-  assignedTool: NavToolName
-  isOpen: boolean
-  onToggle: () => void
-  onClose: () => void
-  onSelect: (tool: NavToolName) => void
-}
-
-function SlotButton({
-  label,
-  shortLabel,
-  assignedTool,
-  isOpen,
-  onToggle,
-  onClose,
-  onSelect,
-}: SlotButtonProps) {
-  const buttonRef = useRef<HTMLButtonElement>(null)
-
-  return (
-    <div className="relative shrink-0">
-      <button
-        ref={buttonRef}
-        type="button"
-        title={`${label}: ${TOOL_LABELS[assignedTool]}`}
-        aria-haspopup="dialog"
-        aria-expanded={isOpen}
-        onClick={onToggle}
-        className={itemClass(isOpen)}
-      >
-        <div className="relative">
-          <Mouse className="h-4 w-4" />
-
-          <span className="absolute -bottom-1 -right-1 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-[var(--color-surface)] font-mono text-[7px] font-bold text-[var(--color-text)]">
-            {shortLabel}
-          </span>
-        </div>
-
-        <span className="max-w-14 truncate">
-          {TOOL_LABELS[assignedTool]}
-        </span>
-      </button>
-
-      <AnchoredPopover open={isOpen} anchorRef={buttonRef} onClose={onClose} align="end">
-        <div className="w-52 max-w-[85vw] rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface-raised)] p-3 shadow-2xl">
-          <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text)]">
-            {label}
-          </p>
-
-          <select
-            autoFocus
-            value={assignedTool}
-            onChange={(event) => onSelect(event.target.value as NavToolName)}
-            className="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-xs text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-          >
-            {TOOL_OPTIONS.map((tool) => (
-              <option key={tool} value={tool}>
-                {TOOL_LABELS[tool]}
-              </option>
-            ))}
-          </select>
-        </div>
-      </AnchoredPopover>
-    </div>
-  )
-}
-
 /**
  * Desktop-only (see ViewerToolbar, which renders TouchToolSettings instead
- * on touch/coarse-pointer devices) — "left/middle/right mouse button" is a
- * meaningless concept on a touchscreen, and showing this control there was
- * dead UI a finger can't actually use.
+ * on touch/coarse-pointer devices).
+ *
+ * Keeps independent mouse-button configuration for each button (Left, Middle, Right),
+ * housed within a single compact popover triggered from the toolbar.
  */
 export default function MouseBindingSettings({
   bindings,
   onChange,
+  disabled = false,
+  disabledTooltip,
 }: Props) {
-  const [openSlot, setOpenSlot] = useState<MouseButtonSlot | null>(null)
+  const [open, setOpen] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   const handleBindingChange = (slot: MouseButtonSlot, tool: NavToolName) => {
     onChange({
       ...bindings,
       [slot]: tool,
     })
-    setOpenSlot(null)
   }
 
+  const tooltip = disabled
+    ? disabledTooltip ?? 'Mouse settings disabled'
+    : `Mouse bindings (L: ${TOOL_LABELS[bindings.left]}, M: ${TOOL_LABELS[bindings.middle]}, R: ${TOOL_LABELS[bindings.right]})`
+
   return (
-    <div className="flex items-center gap-1">
-      {SLOTS.map(({ slot, label, shortLabel }) => (
-        <SlotButton
-          key={slot}
-          label={label}
-          shortLabel={shortLabel}
-          assignedTool={bindings[slot]}
-          isOpen={openSlot === slot}
-          onToggle={() => setOpenSlot((current) => (current === slot ? null : slot))}
-          onClose={() => setOpenSlot(null)}
-          onSelect={(tool) => handleBindingChange(slot, tool)}
-        />
-      ))}
+    <div className="relative shrink-0">
+      <button
+        ref={buttonRef}
+        type="button"
+        title={tooltip}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => !disabled && setOpen((prev) => !prev)}
+        disabled={disabled}
+        className={`${itemClass(open)} ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
+      >
+        <Mouse className="h-5 w-5" />
+        <span>Mouse</span>
+      </button>
+
+      <AnchoredPopover
+        open={open && !disabled}
+        anchorRef={buttonRef}
+        onClose={() => setOpen(false)}
+        align="end"
+      >
+        <div className="w-64 max-w-[90vw] rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface-raised)] p-3 shadow-2xl">
+          <p className="mb-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text)]">
+            Mouse Button Actions
+          </p>
+
+          <div className="space-y-2">
+            {SLOTS.map(({ slot, label, shortLabel }) => (
+              <div
+                key={slot}
+                className="flex items-center justify-between gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]/60 px-2.5 py-1.5"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[var(--color-border-strong)] bg-[var(--color-surface)] font-mono text-[10px] font-bold text-[var(--color-accent)]">
+                    {shortLabel}
+                  </span>
+                  <span className="truncate text-xs font-medium text-[var(--color-text)]">
+                    {label}
+                  </span>
+                </div>
+
+                <select
+                  value={bindings[slot]}
+                  onChange={(event) =>
+                    handleBindingChange(slot, event.target.value as NavToolName)
+                  }
+                  className="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                >
+                  {TOOL_OPTIONS.map((tool) => (
+                    <option key={tool} value={tool}>
+                      {TOOL_LABELS[tool]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      </AnchoredPopover>
     </div>
   )
 }

@@ -16,6 +16,7 @@ import {
   Trash2,
   XCircle,
   Box,
+  Link2,
 } from 'lucide-react'
 
 import {
@@ -86,6 +87,10 @@ interface Props {
   mprActive: boolean
   onToggleMpr: () => void
   mprCapable: boolean
+
+  // sync
+  syncEnabled: boolean
+  onToggleSync: () => void
 }
 
 const MEASUREMENT_ITEMS: {
@@ -151,14 +156,14 @@ const MEASUREMENT_ITEMS: {
 ]
 
 const itemClass = (active: boolean) =>
-  `flex w-14 shrink-0 flex-col items-center gap-0.5 rounded-md px-1.5 py-1.5 text-[10px] font-medium transition-colors ${
+  `flex min-w-[3.25rem] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-1.5 py-1 text-[10px] font-medium leading-tight transition-colors ${
     active
       ? 'text-[var(--color-accent)]'
       : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]'
   }`
 
 const Divider = () => (
-  <div className="mx-1 h-8 w-px shrink-0 bg-[var(--color-border-strong)]" />
+  <div className="mx-1 h-7 w-px shrink-0 bg-[var(--color-border-strong)]" />
 )
 
 export default function ViewerToolbar({
@@ -188,6 +193,8 @@ export default function ViewerToolbar({
   mprActive,
   onToggleMpr,
   mprCapable,
+  syncEnabled,
+  onToggleSync,
 }: Props) {
   // Mouse-button bindings (left/middle/right) are a meaningless concept on
   // a touchscreen, so touch/tablet devices get a different control here —
@@ -197,28 +204,41 @@ export default function ViewerToolbar({
 
   return (
     <div
-      className="flex flex-nowrap items-center gap-1 overflow-x-auto border-t border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 lg:flex-wrap lg:overflow-visible lg:border-b lg:border-t-0"
+      className="flex flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden border-t border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 lg:border-b lg:border-t-0"
       style={{ paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom))' }}
     >
       <button
         type="button"
-        title="Invert grayscale (active viewport)"
-        onClick={onToggleInvert}
-        className={itemClass(invert)}
+        title={mprActive ? 'Invert is not supported in MPR mode' : 'Invert grayscale (active viewport)'}
+        onClick={!mprActive ? onToggleInvert : undefined}
+        disabled={mprActive}
+        className={`${itemClass(invert && !mprActive)} ${mprActive ? 'cursor-not-allowed opacity-40' : ''}`}
       >
-        <Contrast className="h-4 w-4" />
+        <Contrast className="h-5 w-5" />
         Invert
       </button>
 
       <button
         type="button"
-        title={mprCapable ? (mprActive ? 'Exit MPR (Multi-Planar Reconstruction)' : 'MPR (Multi-Planar Reconstruction)') : 'MPR unavailable — series needs ≥ 3 slices'}
+        title={
+          mprActive
+            ? 'Exit MPR (Multi-Planar Reconstruction) and return to previous layout'
+            : mprCapable
+            ? 'MPR (Multi-Planar Reconstruction)'
+            : 'MPR unavailable — series needs ≥ 3 slices'
+        }
         onClick={onToggleMpr}
-        disabled={!mprCapable}
-        className={`${itemClass(mprActive)} ${!mprCapable ? 'cursor-not-allowed opacity-40' : ''}`}
+        disabled={!mprCapable && !mprActive}
+        className={`${itemClass(mprActive)} min-w-[3.5rem] ${
+          !mprCapable && !mprActive ? 'cursor-not-allowed opacity-40' : ''
+        } ${
+          mprActive
+            ? 'rounded-md ring-1 ring-[var(--color-accent)] bg-[var(--color-accent)]/15 font-semibold text-[var(--color-accent)]'
+            : ''
+        }`}
       >
-        <Box className="h-4 w-4" />
-        MPR
+        <Box className="h-5 w-5" />
+        {mprActive ? 'Exit MPR' : 'MPR'}
       </button>
 
       <Divider />
@@ -229,19 +249,42 @@ export default function ViewerToolbar({
         max={MAX_GRID}
         label="Layout"
         onOuterLayoutChange={onOuterLayoutChange}
-        onImageLayoutChange={
-          onActiveCellImageLayoutChange
-        }
+        onImageLayoutChange={onActiveCellImageLayoutChange}
+        disabled={mprActive}
+        disabledTooltip="Layout is fixed to tri-planar orthogonal view in MPR mode"
       />
 
-  <button
+      <button
         type="button"
-        title="Reset pan/zoom/window (active viewport)"
+        title={mprActive ? 'Reset pan/zoom/window (all MPR planes)' : 'Reset pan/zoom/window (active viewport)'}
         onClick={onReset}
         className={itemClass(false)}
       >
-        <RotateCcw className="h-4 w-4" />
+        <RotateCcw className="h-5 w-5" />
         Reset
+      </button>
+
+      <button
+        type="button"
+        title={
+          mprActive
+            ? 'Synchronization is automatic via orthogonal crosshairs in MPR mode'
+            : syncEnabled
+            ? 'Sync viewports (Enabled) — click to unlink independent viewports'
+            : 'Sync viewports — synchronize zoom, pan, window/level, and slice scrolling across viewports'
+        }
+        onClick={!mprActive ? onToggleSync : undefined}
+        disabled={mprActive}
+        className={`${itemClass(syncEnabled && !mprActive)} ${
+          mprActive ? 'cursor-not-allowed opacity-40' : ''
+        } ${
+          syncEnabled && !mprActive
+            ? 'rounded-md ring-1 ring-[var(--color-accent)] bg-[var(--color-accent)]/15 font-semibold text-[var(--color-accent)]'
+            : ''
+        }`}
+      >
+        <Link2 className="h-5 w-5" />
+        Sync
       </button>
 
       <Divider />
@@ -255,61 +298,62 @@ export default function ViewerToolbar({
         onLoopChange={onCineLoopChange}
         simultaneous={simultaneousPlay}
         onSimultaneousChange={onSimultaneousPlayChange}
+        disabled={mprActive}
+        disabledTooltip="Cine playback is not supported in MPR mode"
       />
 
       <Divider />
 
       <button
         type="button"
-        title="Navigate (exit measurement mode)"
-        onClick={onExitMeasurement}
-        className={itemClass(
-          activeMeasurementTool === null,
-        )}
+        title={mprActive ? 'Stack navigation is handled by crosshairs in MPR mode' : 'Navigate (exit measurement mode)'}
+        onClick={!mprActive ? onExitMeasurement : undefined}
+        disabled={mprActive}
+        className={`${itemClass(!mprActive && activeMeasurementTool === null)} ${
+          mprActive ? 'cursor-not-allowed opacity-40' : ''
+        }`}
       >
-        <ChevronsUpDown className="h-4 w-4" />
+        <ChevronsUpDown className="h-5 w-5" />
         Stack
       </button>
 
-      {MEASUREMENT_ITEMS.map(
-        ({ tool, label, icon: Icon }) => (
-          <button
-            key={tool}
-            type="button"
-            title={label}
-            onClick={() =>
-              onSelectMeasurementTool(tool)
-            }
-            className={itemClass(
-              activeMeasurementTool === tool,
-            )}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </button>
-        ),
-      )}
-
+      {MEASUREMENT_ITEMS.map(({ tool, label, icon: Icon }) => (
+        <button
+          key={tool}
+          type="button"
+          title={mprActive ? `${label} measurement is not supported in MPR mode` : label}
+          onClick={!mprActive ? () => onSelectMeasurementTool(tool) : undefined}
+          disabled={mprActive}
+          className={`${itemClass(!mprActive && activeMeasurementTool === tool)} ${
+            mprActive ? 'cursor-not-allowed opacity-40' : ''
+          }`}
+        >
+          <Icon className="h-5 w-5" />
+          {label}
+        </button>
+      ))}
 
       <Divider />
 
       <button
         type="button"
-        title="Delete selected annotation"
-        onClick={onDeleteSelected}
-        className={itemClass(false)}
+        title={mprActive ? 'Annotation deletion is not supported in MPR mode' : 'Delete selected annotation'}
+        onClick={!mprActive ? onDeleteSelected : undefined}
+        disabled={mprActive}
+        className={`${itemClass(false)} ${mprActive ? 'cursor-not-allowed opacity-40' : ''}`}
       >
-        <XCircle className="h-4 w-4" />
+        <XCircle className="h-5 w-5" />
         Delete
       </button>
 
       <button
         type="button"
-        title="Clear all annotations"
-        onClick={onClearAll}
-        className={itemClass(false)}
+        title={mprActive ? 'Clearing annotations is not supported in MPR mode' : 'Clear all annotations'}
+        onClick={!mprActive ? onClearAll : undefined}
+        disabled={mprActive}
+        className={`${itemClass(false)} ${mprActive ? 'cursor-not-allowed opacity-40' : ''}`}
       >
-        <Trash2 className="h-4 w-4" />
+        <Trash2 className="h-5 w-5" />
         Clear all
       </button>
 
@@ -326,11 +370,15 @@ export default function ViewerToolbar({
         <TouchToolSettings
           bindings={navBindings}
           onChange={onNavBindingsChange}
+          disabled={mprActive}
+          disabledTooltip="Touch gestures are fixed in MPR mode"
         />
       ) : (
         <MouseBindingSettings
           bindings={navBindings}
           onChange={onNavBindingsChange}
+          disabled={mprActive}
+          disabledTooltip="Mouse bindings are fixed in MPR mode (Left: Crosshairs, Right: Window/Level, Middle: Pan)"
         />
       )}
     </div>

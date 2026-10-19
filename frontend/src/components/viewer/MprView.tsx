@@ -10,7 +10,7 @@
  * - Volume loading progress indicator
  * - Graceful error handling for incompatible series
  */
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import {
   RenderingEngine,
   Enums as CoreEnums,
@@ -45,6 +45,10 @@ const MPR_VIEWPORT_IDS = {
 
 const MPR_TOOL_GROUP_ID = 'mpr-tool-group'
 
+export interface MprViewHandle {
+  resetView: () => void
+}
+
 interface Props {
   series: SeriesRecord
   study: StudyRecord
@@ -56,12 +60,38 @@ const PLANE_COLORS: Record<string, string> = {
   [MPR_VIEWPORT_IDS.coronal]: '#a3e635',   // lime
 }
 
-export default function MprView({ series, study }: Props) {
+const MprView = forwardRef<MprViewHandle, Props>(function MprView(
+  { series, study }: Props,
+  ref,
+) {
   const axialRef = useRef<HTMLDivElement>(null)
   const sagittalRef = useRef<HTMLDivElement>(null)
   const coronalRef = useRef<HTMLDivElement>(null)
   const mprEngineRef = useRef<RenderingEngine | null>(null)
+  const volumeIdRef = useRef<string | null>(null)
   const toolGroupCreatedRef = useRef(false)
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      resetView: () => {
+        const engine = mprEngineRef.current
+        if (!engine) return
+        for (const vpId of Object.values(MPR_VIEWPORT_IDS)) {
+          try {
+            const vp = engine.getViewport(vpId)
+            if (vp) {
+              vp.resetCamera()
+            }
+          } catch {
+            // ignore
+          }
+        }
+        engine.renderViewports(Object.values(MPR_VIEWPORT_IDS))
+      },
+    }),
+    [],
+  )
 
   const [loading, setLoading] = useState(true)
   const [progress, setProgress] = useState(0)
@@ -130,6 +160,7 @@ export default function MprView({ series, study }: Props) {
           if (!cancelled) setProgress(pct)
         })
         if (cancelled) return
+        volumeIdRef.current = volumeId
 
         // 2. Create a dedicated rendering engine for MPR so we don't
         //    interfere with the main stack engine's viewport IDs.
@@ -362,17 +393,17 @@ export default function MprView({ series, study }: Props) {
         </div>
 
         {/* Info pane (bottom-right quadrant) */}
-        <div className="flex min-h-0 min-w-0 flex-col items-center justify-center bg-[var(--color-surface)] p-4">
-          <p className="text-sm font-medium text-[var(--color-text)]">
+        <div className="flex min-h-0 min-w-0 flex-col items-center justify-center bg-[var(--color-surface)] p-3 sm:p-4 text-center">
+          <p className="text-xs sm:text-sm font-medium text-[var(--color-text)]">
             MPR — {series.seriesDescription || 'Series'}
           </p>
-          <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+          <p className="mt-1 text-[11px] sm:text-xs text-[var(--color-text-muted)]">
             {study.patientName} · {study.patientId}
           </p>
-          <p className="mt-0.5 text-xs text-[var(--color-text-dim)]">
+          <p className="mt-0.5 text-[10px] sm:text-xs text-[var(--color-text-dim)]">
             {series.modality} · {series.instances.length} slices
           </p>
-          <div className="mt-3 space-y-1 text-[10px] text-[var(--color-text-muted)]">
+          <div className="mt-3 space-y-1 text-[9px] sm:text-[10px] text-[var(--color-text-muted)] max-w-xs">
             <p>
               <span
                 className="mr-1 inline-block h-2 w-2 rounded-full"
@@ -385,28 +416,36 @@ export default function MprView({ series, study }: Props) {
                 className="mr-1 inline-block h-2 w-2 rounded-full"
                 style={{ backgroundColor: PLANE_COLORS[MPR_VIEWPORT_IDS.sagittal] }}
               />
-              Right click to window/level
+              Right click to window/level · Middle to pan
             </p>
             <p>
               <span
                 className="mr-1 inline-block h-2 w-2 rounded-full"
                 style={{ backgroundColor: PLANE_COLORS[MPR_VIEWPORT_IDS.coronal] }}
               />
-              Middle click to pan · Ctrl+wheel to zoom
+              Scroll wheel or crosshairs to navigate slices
             </p>
           </div>
         </div>
       </div>
     </div>
   )
-}
+})
+
+export default MprView
 
 /** Small colored label in the corner of each MPR pane. */
 function MprPaneLabel({ label, color }: { label: string; color: string }) {
   return (
     <div
-      className="pointer-events-none absolute left-2 top-2 select-none rounded px-1.5 py-0.5 font-mono text-[10px] font-bold drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
-      style={{ color, borderColor: color, borderWidth: 1, borderStyle: 'solid', backgroundColor: 'rgba(0,0,0,0.5)' }}
+      className="pointer-events-none absolute left-2 top-2 select-none rounded px-1.5 py-0.5 font-mono text-[9px] sm:text-[10px] font-bold drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+      style={{
+        color,
+        borderColor: color,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        backgroundColor: 'rgba(0,0,0,0.5)',
+      }}
     >
       {label}
     </div>
