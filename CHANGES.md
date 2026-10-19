@@ -149,3 +149,38 @@ The refresh cookie is `SameSite=Lax` by default. A browser only sends it on a cr
 - **Cookie `SameSite` and cross-site deployment** must be verified on the real hosts (see the deployment note).
 - `frontend/src/lib/pacs/dicomWebClient.ts` (the unused PACS seam) does not send tokens. Wire it through the same auth layer before using it.
 - The OpenAPI JSON and Scalar UI remain public, as before. Restrict them if the API surface should not be visible.
+
+---
+
+# Multi-Planar Reconstruction (MPR): change summary
+
+Extends the DICOM viewer with fully functional Multi-Planar Reconstruction (MPR). The feature enables simultaneous viewing of reconstructed **Axial**, **Sagittal**, and **Coronal** planes from a single 3D DICOM volume with synchronized crosshair navigation, window/level, zoom, pan, and memory cleanup.
+
+## Architecture and Design
+
+| Concern | Implementation Decision |
+|---|---|
+| Volume reconstruction | Uses Cornerstone3D's streaming volume loader (`volumeLoader.createAndCacheVolume` and `setVolumesForViewports`). Reconstructs true volumetric slices across all planes using Cornerstone's `ORTHOGRAPHIC` VolumeViewports rather than three independent image stacks |
+| Coordinate & slice ordering | Cornerstone3D handles patient coordinate transformation (LPS), ImageOrientationPatient, ImagePositionPatient, PixelSpacing, and slice thickness/spacing internally when building the volume actor |
+| Plane synchronization | Configured `CrosshairsTool` bound to primary button on the MPR viewports. Scrubbing or clicking in one plane updates reference crosshairs across all three orthogonal planes simultaneously |
+| Navigation & interaction | Right mouse button: Window/Level; Middle mouse button: Pan; Ctrl+Wheel / Pinch: Zoom |
+| Security & Auth integrity | Reuses the established WADO-URI loader configuration with bearer JWT authentication. Volume streaming utilizes authenticated chunk requests seamlessly |
+| Memory lifecycle | MPR runs inside an isolated `RenderingEngine` and dedicated `ToolGroup`. Toggling MPR cleans up viewports, unregisters tool groups, evicts volume caches via `cornerstoneCache.removeVolumeLoadObject`, and frees GPU/CPU allocations |
+| Graceful degradation | Series eligibility check (`isMprCapable`) requires $\ge 3$ slices. Incompatible or single-slice series disable the MPR toolbar button and present explanatory feedback without crashing the viewer |
+
+## Files Added
+- `frontend/src/lib/volumeUtils.ts`: Pure helper utilities for deterministic volume ID formatting (`volumeIdForSeries`) and slice volume validation (`isMprCapable`).
+- `frontend/src/lib/volumeLoader.ts`: Volume loading module interfacing with Cornerstone3D volume loader, caching, progress tracking, and memory teardown.
+- `frontend/src/components/viewer/MprView.tsx`: Orthographic tri-planar viewport component (Axial, Sagittal, Coronal) with crosshairs and metadata overlays.
+- `frontend/src/lib/mpr.test.ts`: Automated unit test suite verifying deterministic volume IDs, series capability validation, and orientation coordinate transformations.
+
+## Files Modified
+- `frontend/src/components/viewer/ViewerToolbar.tsx`: Added `Box` icon toggle for MPR mode with disabled state and tooltip for series with $<3$ slices.
+- `frontend/src/pages/ViewerPage.tsx`: Integrated MPR state, capability checks on active series, toolbar wiring, and conditional rendering of MPR view vs standard viewport grid.
+- `frontend/src/package.json`: Added `test` script running `node --experimental-strip-types` and scoped `lint` to `src`.
+- `frontend/tsconfig.app.json`: Excluded test files from production application build bundle.
+
+## Validation Results
+- **Unit Tests**: `node --experimental-strip-types --test src/lib/*.test.ts` passed (3/3 tests passing: volume ID determinism, slice threshold checks, and DICOM orientation matrix math).
+- **Linter**: `oxlint src` passed with 0 errors.
+- **Build**: `tsc -b && vite build` passed and produced production bundle cleanly.

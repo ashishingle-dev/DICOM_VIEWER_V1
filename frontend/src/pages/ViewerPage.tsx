@@ -5,7 +5,9 @@ import { useDicomLayout } from '../hooks/useDicomLayout'
 import SeriesPanel from '../components/viewer/SeriesPanel'
 import ViewerToolbar from '../components/viewer/ViewerToolbar'
 import ViewportGrid from '../components/viewer/ViewportGrid'
+import MprView from '../components/viewer/MprView'
 import { getInstances, getSeries, getStudy } from '../lib/pacs/apiClient'
+import { isMprCapable } from '../lib/volumeLoader'
 import type { SeriesRecord, StudyRecord } from '../types/dicom'
 
 export default function ViewerPage() {
@@ -15,6 +17,7 @@ export default function ViewerPage() {
   const [seriesPanelOpen, setSeriesPanelOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [mprActive, setMprActive] = useState(false)
 
   const {
     isReady,
@@ -131,6 +134,16 @@ export default function ViewerPage() {
   const activeCell = cells[activeCellIndex]
   const activeCellImageLayout = activeCell?.imageLayout ?? { rows: 1, cols: 1 }
 
+  // MPR: determine the active series record and whether it's MPR-capable
+  const activeSeries = activeCell?.seriesInstanceUID
+    ? series.find((s) => s.seriesInstanceUID === activeCell.seriesInstanceUID) ?? null
+    : null
+  const mprCapable = activeSeries ? isMprCapable(activeSeries) : false
+
+  const handleToggleMpr = useCallback(() => {
+    setMprActive((prev) => !prev)
+  }, [])
+
   const handleActiveCellImageLayoutChange = (layout: typeof activeCellImageLayout) => {
     setCellImageLayout(activeCellIndex, layout)
   }
@@ -229,6 +242,9 @@ export default function ViewerPage() {
           onCineLoopChange={setCineLoop}
           simultaneousPlay={simultaneousPlay}
           onSimultaneousPlayChange={setSimultaneousPlay}
+          mprActive={mprActive}
+          onToggleMpr={handleToggleMpr}
+          mprCapable={mprCapable}
         />
       </div>
 
@@ -260,6 +276,11 @@ export default function ViewerPage() {
                 {loading ? 'Loading study…' : 'Initializing viewer…'}
               </p>
             </div>
+          ) : mprActive && activeSeries ? (
+            <MprView
+              series={activeSeries}
+              study={{ ...study, series }}
+            />
           ) : (
             <ViewportGrid
               cells={cells}

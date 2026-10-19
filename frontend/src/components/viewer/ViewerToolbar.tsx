@@ -15,6 +15,7 @@ import {
   ChevronsUpDown,
   Trash2,
   XCircle,
+  Box,
 } from 'lucide-react'
 
 import {
@@ -80,6 +81,11 @@ interface Props {
   onCineLoopChange: (loop: boolean) => void
   simultaneousPlay: boolean
   onSimultaneousPlayChange: (value: boolean) => void
+
+  // mpr
+  mprActive: boolean
+  onToggleMpr: () => void
+  mprCapable: boolean
 }
 
 const MEASUREMENT_ITEMS: {
@@ -179,6 +185,9 @@ export default function ViewerToolbar({
   onCineLoopChange,
   simultaneousPlay,
   onSimultaneousPlayChange,
+  mprActive,
+  onToggleMpr,
+  mprCapable,
 }: Props) {
   // Mouse-button bindings (left/middle/right) are a meaningless concept on
   // a touchscreen, so touch/tablet devices get a different control here —
@@ -199,6 +208,17 @@ export default function ViewerToolbar({
       >
         <Contrast className="h-4 w-4" />
         Invert
+      </button>
+
+      <button
+        type="button"
+        title={mprCapable ? (mprActive ? 'Exit MPR (Multi-Planar Reconstruction)' : 'MPR (Multi-Planar Reconstruction)') : 'MPR unavailable — series needs ≥ 3 slices'}
+        onClick={onToggleMpr}
+        disabled={!mprCapable}
+        className={`${itemClass(mprActive)} ${!mprCapable ? 'cursor-not-allowed opacity-40' : ''}`}
+      >
+        <Box className="h-4 w-4" />
+        MPR
       </button>
 
       <Divider />
